@@ -19,4 +19,7 @@ export const BRAND = {
     segmentInactive: '#1E1B4B',
     glow: '#6366F1',
   },
+  destructive: {
+    500: '#DF3838',
+  },
 } as const;

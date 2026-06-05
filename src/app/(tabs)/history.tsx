@@ -59,7 +59,7 @@ function TripHistoryCard({
           accessibilityRole="button"
           accessibilityLabel={`Delete trip from ${formatTripDateTime(trip.endedAt)}`}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          className="rounded-full border border-destructive/20 bg-destructive/10 p-2.5 active:opacity-80"
+          className="rounded-full border text-destructive border-destructive/20 bg-destructive/10 p-2.5 active:opacity-80"
         >
           <SymbolView
             name={{
@@ -68,7 +68,7 @@ function TripHistoryCard({
               web: "delete",
             }}
             size={18}
-            tintColor={BRAND.indigo[500]}
+            tintColor={BRAND.destructive[500]}
           />
         </Pressable>
       </View>

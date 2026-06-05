@@ -47,7 +47,7 @@ export default function PrivacyScreen() {
   const router = useRouter();
 
   return (
-    <SafeAreaView className="flex-1 bg-background" edges={['top', 'bottom']}>
+    <SafeAreaView className="flex-1 bg-background" edges={['top']}>
       <Stack.Screen options={{ headerShown: false }} />
       <View className="flex-row items-center justify-between px-5 pt-2">
         <Pressable

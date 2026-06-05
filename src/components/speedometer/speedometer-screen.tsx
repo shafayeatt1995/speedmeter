@@ -1,6 +1,6 @@
 import { SymbolView, type SymbolViewProps } from "expo-symbols";
 import { useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -21,6 +21,7 @@ import { Text } from "@/components/ui/text";
 import { useSpeedometerContext } from "@/contexts/speedometer-context";
 import type { SpeedometerStats, TrackingStatus } from "@/hooks/use-speedometer";
 import { BRAND } from "@/lib/brand";
+import { DISPLAY_FONT } from "@/lib/fonts";
 import {
   DEFAULT_MAP_DARK_MODE,
   loadStoredMapDarkMode,
@@ -438,34 +439,35 @@ function MapModePanel({
   const facingLabel = headingToCompassLabel(heading);
   const facingShort = headingToCompassShort(heading);
 
+  const displaySpeed = formatDecimal(Math.max(0, stats.currentSpeed));
+
   return (
     <View className="rounded-md border border-primary/20 bg-card p-3">
-      <View className="flex-row items-center gap-3">
-        <View className="min-w-0 flex-1">
-          <Text className="text-[10px] font-bold uppercase text-primary">
-            Current speed
-          </Text>
-          <Text className="text-3xl font-bold leading-tight">
-            {formatSpeed(stats.currentSpeed, unit)}
-          </Text>
-          <Text variant="muted" className="mt-1 text-xs">
-            {formatDistance(stats.distanceMeters, unit)} ·{" "}
-            {isTracking ? "Recording" : "Paused"}
+      <View className="flex-row items-center gap-4 py-1">
+        <Text
+          style={{
+            fontSize: 96,
+            lineHeight: 100,
+            fontFamily: DISPLAY_FONT.extraBold,
+            fontVariant: ["tabular-nums"],
+            letterSpacing: -3,
+            color: BRAND.indigo[500],
+          }}
+        >
+          {displaySpeed}
+        </Text>
+        <View className="min-w-0 flex-1 justify-center">
+          <Text
+            className="text-xl font-bold uppercase text-primary"
+            style={{ color: BRAND.indigo[400] }}
+          >
+            {getUnitLabel(unit)}
           </Text>
           {heading != null ? (
-            <Text className="mt-1 text-xs font-semibold text-primary">
-              Facing {facingLabel} ({facingShort})
+            <Text className="mt-1 text-sm font-semibold text-primary">
+              {facingLabel} ({facingShort})
             </Text>
           ) : null}
-        </View>
-
-        <View className="flex-row items-center gap-2">
-          <PlayPauseButton
-            compact
-            showLabel={false}
-            status={status}
-            onPress={() => void onTogglePlayPause()}
-          />
         </View>
       </View>
 
@@ -480,7 +482,7 @@ function MapModePanel({
         </View>
         <View className="flex-1 rounded-sm bg-primary/5 px-2 py-1.5">
           <Text variant="muted" className="text-[9px] uppercase">
-            Avg w/ rest
+            Avg speed
           </Text>
           <Text className="text-sm font-semibold">
             {formatSpeed(stats.avgSpeedWithRest, unit)}
@@ -496,7 +498,13 @@ function MapModePanel({
         </View>
       </View>
 
-      <View className="mt-3 flex-row gap-3">
+      <View className="mt-3 flex-row items-center gap-2">
+        <PlayPauseButton
+          compact
+          showLabel={false}
+          status={status}
+          onPress={() => void onTogglePlayPause()}
+        />
         <Button
           className="flex-1 rounded-md"
           disabled={!tripActive}
@@ -538,7 +546,7 @@ export function SpeedometerScreen() {
     resetSession,
   } = useSpeedometerContext();
 
-  const [viewMode, setViewMode] = useState<HomeViewMode>("normal");
+  const [viewMode, setViewMode] = useState<HomeViewMode>("map");
   const [endTripDialogVisible, setEndTripDialogVisible] = useState(false);
   const [pendingTrip, setPendingTrip] = useState<SavedTrip | null>(null);
   const [mapDarkMode, setMapDarkMode] = useState(DEFAULT_MAP_DARK_MODE);
@@ -569,18 +577,20 @@ export function SpeedometerScreen() {
     setIsMapFollowingUser(true);
   };
 
-  useEffect(() => {
-    if (viewMode !== "map") {
-      return;
+  const handleViewModeChange = (mode: HomeViewMode) => {
+    if (mode === "map") {
+      setIsMapFollowingUser(true);
     }
+    setViewMode(mode);
+  };
 
-    setIsMapFollowingUser(true);
+  const handleMapReady = useCallback(() => {
     liveTripMapRef.current?.enableFollowing();
 
     if (currentPosition) {
       liveTripMapRef.current?.centerOnPosition();
     }
-  }, [viewMode]);
+  }, [currentPosition]);
 
   const isTracking = status === "tracking";
   const tripActive = status !== "idle";
@@ -636,7 +646,7 @@ export function SpeedometerScreen() {
     <>
       <SafeAreaView className="flex-1 bg-background">
         <View className="flex-row items-center justify-between px-5 pt-2">
-          <ViewModeToggle mode={viewMode} onChange={setViewMode} />
+          <ViewModeToggle mode={viewMode} onChange={handleViewModeChange} />
           <ScreenTopActions>
             <UnitToggle unit={unit} onChange={setUnit} />
           </ScreenTopActions>
@@ -695,11 +705,12 @@ export function SpeedometerScreen() {
                       routePoints={liveRoutePoints}
                       currentPosition={currentPosition}
                       darkMode={mapDarkMode}
+                      onReady={handleMapReady}
                       onFollowingChange={setIsMapFollowingUser}
                       style={{
                         flex: 1,
                         borderRadius: 8,
-                        backgroundColor: mapDarkMode ? "#334155" : "#EEF2FF",
+                        backgroundColor: mapDarkMode ? "#1A1A2E" : "#EEF2FF",
                       }}
                     />
                     <View
@@ -725,9 +736,7 @@ export function SpeedometerScreen() {
                     {isMapFollowingUser ? <MapFixedPointer /> : null}
                   </View>
                 ) : (
-                  <View
-                    className="min-h-0 flex-1 items-center justify-center rounded-md border border-primary/20 bg-card"
-                  >
+                  <View className="min-h-0 flex-1 items-center justify-center rounded-md border border-primary/20 bg-card">
                     <Text variant="muted">Loading map...</Text>
                   </View>
                 )}

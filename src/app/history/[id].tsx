@@ -51,7 +51,7 @@ export default function TripDetailScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-background">
+    <SafeAreaView className="flex-1 bg-background" edges={['top']}>
       <ScrollView contentContainerClassName="px-5 pb-10" showsVerticalScrollIndicator={false}>
         <View className="flex-row items-center justify-between pt-2">
           <Pressable

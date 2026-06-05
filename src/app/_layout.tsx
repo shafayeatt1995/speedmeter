@@ -20,6 +20,7 @@ import { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { useColorScheme } from 'nativewind';
 
+import { AppBottomTabBar } from '@/components/bottom-tab-bar';
 import { NAV_THEME } from '@/lib/theme';
 import {
   DEFAULT_APP_COLOR_SCHEME,
@@ -66,12 +67,15 @@ export default function RootLayout() {
     <View className={cn('flex-1 bg-background', resolvedScheme === 'dark' && 'dark')}>
       <ThemeProvider value={NAV_THEME[resolvedScheme]}>
         <StatusBar style={resolvedScheme === 'dark' ? 'light' : 'dark'} />
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="history/[id]" />
-          <Stack.Screen name="history/replay/[id]" />
-          <Stack.Screen name="privacy" />
-        </Stack>
+        <View className="flex-1">
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="history/[id]" />
+            <Stack.Screen name="history/replay/[id]" />
+            <Stack.Screen name="privacy" />
+          </Stack>
+        </View>
+        <AppBottomTabBar />
         <PortalHost />
       </ThemeProvider>
     </View>

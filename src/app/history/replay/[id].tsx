@@ -37,7 +37,7 @@ export default function TripReplayScreen() {
 
   if (loading || !isClient) {
     return (
-      <SafeAreaView className="flex-1 items-center justify-center bg-background">
+      <SafeAreaView className="flex-1 items-center justify-center bg-background" edges={['top']}>
         <ActivityIndicator />
       </SafeAreaView>
     );
@@ -45,7 +45,7 @@ export default function TripReplayScreen() {
 
   if (!trip || !tripHasRoute(trip)) {
     return (
-      <SafeAreaView className="flex-1 bg-background px-5">
+      <SafeAreaView className="flex-1 bg-background px-5" edges={['top']}>
         <View className="flex-1 items-center justify-center">
           <Text className="font-semibold">Replay not available</Text>
           <Text variant="muted" className="mt-2 text-center">

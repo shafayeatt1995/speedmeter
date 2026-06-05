@@ -1,15 +1,14 @@
+export const MAP_TILE_SOURCE = {
+  url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  attribution: '&copy; OpenStreetMap contributors',
+} as const;
+
 export const MAP_TILE_THEMES = {
   light: {
-    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; OpenStreetMap contributors',
     background: '#eef2ff',
   },
   dark: {
-    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-    attribution:
-      '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    subdomains: 'abcd',
-    background: '#334155',
+    background: '#1a1a2e',
   },
 } as const;
 
@@ -21,6 +20,7 @@ export const MAP_TILE_LAYER_OPTIONS = {
 export const MAP_NAVIGATION_ZOOM = 16;
 
 export function buildLiveMapHtml() {
+  const mapTileSource = JSON.stringify(MAP_TILE_SOURCE);
   const mapThemes = JSON.stringify(MAP_TILE_THEMES);
   const navigationZoom = MAP_NAVIGATION_ZOOM;
   const tileLayerOptions = JSON.stringify(MAP_TILE_LAYER_OPTIONS);
@@ -51,7 +51,10 @@ export function buildLiveMapHtml() {
       }
       .map-theme-dark,
       .map-theme-dark #map {
-        background: #334155;
+        background: #1a1a2e;
+      }
+      .map-theme-dark .leaflet-tile-pane img {
+        filter: invert(100%) hue-rotate(180deg) brightness(0.95) contrast(1.05) saturate(0.9);
       }
       .current-location-marker {
         background: transparent;
@@ -76,6 +79,7 @@ export function buildLiveMapHtml() {
     ></script>
     <script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
     <script>
+      const TILE_SOURCE = ${mapTileSource};
       const MAP_THEMES = ${mapThemes};
       const TILE_LAYER_OPTIONS = ${tileLayerOptions};
       const NAVIGATION_ZOOM = ${navigationZoom};
@@ -90,24 +94,17 @@ export function buildLiveMapHtml() {
         rotateControl: false,
       });
 
-      let tileLayer = null;
+      L.tileLayer(TILE_SOURCE.url, {
+        maxZoom: TILE_LAYER_OPTIONS.maxZoom,
+        detectRetina: TILE_LAYER_OPTIONS.detectRetina,
+        attribution: TILE_SOURCE.attribution,
+      }).addTo(map);
 
       function applyMapTheme(theme) {
         const config = MAP_THEMES[theme];
         document.body.className = theme === 'dark' ? 'map-theme-dark' : 'map-theme-light';
         document.body.style.background = config.background;
         document.getElementById('map').style.background = config.background;
-
-        if (tileLayer) {
-          map.removeLayer(tileLayer);
-        }
-
-        tileLayer = L.tileLayer(config.url, {
-          maxZoom: TILE_LAYER_OPTIONS.maxZoom,
-          detectRetina: TILE_LAYER_OPTIONS.detectRetina,
-          attribution: config.attribution,
-          subdomains: config.subdomains || 'abc',
-        }).addTo(map);
       }
 
       window.setMapDarkMode = function (isDark) {

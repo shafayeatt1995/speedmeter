@@ -21,25 +21,24 @@ type TabItem = {
   match: (pathname: string) => boolean;
 };
 
+function isHistoryRoute(pathname: string) {
+  return pathname === "/history" || pathname.startsWith("/history/");
+}
+
 const TABS: TabItem[] = [
   {
     href: "/",
     label: "Home",
     icon: { ios: "house", android: "home", web: "home" },
     iconFocused: { ios: "house.fill", android: "home", web: "home" },
-    match: (pathname) =>
-      pathname === "/" ||
-      pathname === "/index" ||
-      pathname.endsWith("/index") ||
-      pathname === "/(tabs)",
+    match: (pathname) => !isHistoryRoute(pathname),
   },
   {
     href: "/history",
     label: "History",
     icon: { ios: "clock", android: "history", web: "history" },
     iconFocused: { ios: "clock.fill", android: "history", web: "history" },
-    match: (pathname) =>
-      pathname === "/history" || pathname.endsWith("/history"),
+    match: isHistoryRoute,
   },
 ];
 
