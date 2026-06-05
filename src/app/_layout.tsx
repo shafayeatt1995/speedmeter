@@ -1,4 +1,5 @@
 import '@/global.css';
+import '@/lib/background-location-task';
 
 import {
   RedHatDisplay_300Light,
@@ -15,16 +16,31 @@ import { PortalHost } from '@rn-primitives/portal';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { View } from 'react-native';
 import { useColorScheme } from 'nativewind';
 
 import { NAV_THEME } from '@/lib/theme';
+import {
+  DEFAULT_APP_COLOR_SCHEME,
+  loadStoredColorScheme,
+} from '@/lib/theme-storage';
+import { cn } from '@/lib/utils';
 
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  const { colorScheme } = useColorScheme();
+  const { colorScheme, setColorScheme } = useColorScheme();
+  const [themeReady, setThemeReady] = useState(false);
   const resolvedScheme = colorScheme === 'dark' ? 'dark' : 'light';
+
+  useEffect(() => {
+    void (async () => {
+      const savedScheme = await loadStoredColorScheme();
+      setColorScheme(savedScheme ?? DEFAULT_APP_COLOR_SCHEME);
+      setThemeReady(true);
+    })();
+  }, [setColorScheme]);
 
   const [fontsLoaded, fontError] = useFonts({
     RedHatDisplay_300Light,
@@ -37,24 +53,27 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
-    if (fontsLoaded || fontError) {
+    if ((fontsLoaded || fontError) && themeReady) {
       void SplashScreen.hideAsync();
     }
-  }, [fontsLoaded, fontError]);
+  }, [fontsLoaded, fontError, themeReady]);
 
-  if (!fontsLoaded && !fontError) {
+  if ((!fontsLoaded && !fontError) || !themeReady) {
     return null;
   }
 
   return (
-    <ThemeProvider value={NAV_THEME[resolvedScheme]}>
-      <StatusBar style={resolvedScheme === 'dark' ? 'light' : 'dark'} />
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="history/[id]" />
-        <Stack.Screen name="history/replay/[id]" />
-      </Stack>
-      <PortalHost />
-    </ThemeProvider>
+    <View className={cn('flex-1 bg-background', resolvedScheme === 'dark' && 'dark')}>
+      <ThemeProvider value={NAV_THEME[resolvedScheme]}>
+        <StatusBar style={resolvedScheme === 'dark' ? 'light' : 'dark'} />
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="history/[id]" />
+          <Stack.Screen name="history/replay/[id]" />
+          <Stack.Screen name="privacy" />
+        </Stack>
+        <PortalHost />
+      </ThemeProvider>
+    </View>
   );
 }

@@ -4,7 +4,6 @@ import {
   formatDuration,
   formatSpeed,
   getUnitLabel,
-  type SpeedUnit,
 } from '@/lib/speed';
 import { formatClockDateTime, formatClockTime } from '@/lib/time-format';
 import type { SavedTrip } from '@/lib/trip-storage';

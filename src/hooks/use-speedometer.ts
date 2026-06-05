@@ -1,16 +1,52 @@
 import * as Location from 'expo-location';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { AppState, Platform, type AppStateStatus } from 'react-native';
 
 import {
+  BACKGROUND_LOCATION_TASK,
+  setBackgroundLocationHandler,
+} from '@/lib/background-location-task';
+import {
   averageSpeedFromDistance,
+  bearingDegrees,
   haversineDistanceMeters,
   metersPerSecondToUnit,
   resolveSpeedMps,
+  smoothHeading,
   type SpeedUnit,
 } from '@/lib/speed';
 import { createTripId, type SavedTrip, type TripRoutePoint } from '@/lib/trip-storage';
 
-const ROUTE_POINT_MIN_DISTANCE_METERS = 25;
+const ROUTE_POINT_MIN_DISTANCE_METERS = 8;
+
+const LOCATION_UPDATE_OPTIONS: Location.LocationTaskOptions = {
+  accuracy: Location.Accuracy.BestForNavigation,
+  timeInterval: 2000,
+  distanceInterval: 5,
+  pausesUpdatesAutomatically: false,
+  showsBackgroundLocationIndicator: true,
+  foregroundService: {
+    notificationTitle: 'Aniker Speedometer',
+    notificationBody: 'Recording your trip in the background',
+    notificationColor: '#4F46E5',
+  },
+};
+
+function supportsBackgroundLocationUpdates() {
+  return Platform.OS === 'ios' || Platform.OS === 'android';
+}
+
+async function hasBackgroundLocationTaskStarted() {
+  if (!supportsBackgroundLocationUpdates()) {
+    return false;
+  }
+
+  try {
+    return await Location.hasStartedLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+  } catch {
+    return false;
+  }
+}
 
 export type TrackingStatus = 'idle' | 'tracking' | 'paused';
 
@@ -23,8 +59,13 @@ export type SpeedometerStats = {
   movingDurationSeconds: number;
   totalDurationSeconds: number;
   altitude: number | null;
-  heading: number | null;
   accuracy: number | null;
+};
+
+export type LivePosition = {
+  latitude: number;
+  longitude: number;
+  heading: number | null;
 };
 
 const INITIAL_STATS: SpeedometerStats = {
@@ -36,7 +77,6 @@ const INITIAL_STATS: SpeedometerStats = {
   movingDurationSeconds: 0,
   totalDurationSeconds: 0,
   altitude: null,
-  heading: null,
   accuracy: null,
 };
 
@@ -53,7 +93,6 @@ function buildStats(
   movingDurationSeconds: number,
   totalDurationSeconds: number,
   altitude: number | null,
-  heading: number | null,
   accuracy: number | null
 ): SpeedometerStats {
   const currentSpeedMps = speedSamplesMps.at(-1) ?? 0;
@@ -68,7 +107,6 @@ function buildStats(
     movingDurationSeconds,
     totalDurationSeconds,
     altitude,
-    heading,
     accuracy,
   };
 }
@@ -78,9 +116,12 @@ export function useSpeedometer() {
   const [status, setStatus] = useState<TrackingStatus>('idle');
   const [stats, setStats] = useState<SpeedometerStats>(INITIAL_STATS);
   const [permissionGranted, setPermissionGranted] = useState<boolean | null>(null);
+  const [backgroundPermissionGranted, setBackgroundPermissionGranted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [liveRoutePoints, setLiveRoutePoints] = useState<TripRoutePoint[]>([]);
+  const [currentPosition, setCurrentPosition] = useState<LivePosition | null>(null);
+  const [tripStartPosition, setTripStartPosition] = useState<LivePosition | null>(null);
 
-  const subscriptionRef = useRef<Location.LocationSubscription | null>(null);
   const previousPositionRef = useRef<PositionSnapshot | null>(null);
   const tripStartedAtRef = useRef<number | null>(null);
   const accumulatedMovingDurationRef = useRef(0);
@@ -91,15 +132,16 @@ export function useSpeedometer() {
   const lastRoutePointRef = useRef<Pick<TripRoutePoint, 'latitude' | 'longitude'> | null>(null);
   const latestTelemetryRef = useRef({
     altitude: null as number | null,
-    heading: null as number | null,
     accuracy: null as number | null,
   });
   const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const foregroundSubscriptionRef = useRef<Location.LocationSubscription | null>(null);
+  const headingSubscriptionRef = useRef<Location.LocationSubscription | null>(null);
+  const currentHeadingRef = useRef<number | null>(null);
   const unitRef = useRef(unit);
   const statusRef = useRef(status);
   const autoStartAttemptedRef = useRef(false);
   const hasInitializedRef = useRef(false);
-  const startTrackingRef = useRef<() => Promise<void>>(async () => {});
 
   useEffect(() => {
     statusRef.current = status;
@@ -115,7 +157,6 @@ export function useSpeedometer() {
         current.movingDurationSeconds,
         current.totalDurationSeconds,
         latestTelemetryRef.current.altitude,
-        latestTelemetryRef.current.heading,
         latestTelemetryRef.current.accuracy
       )
     );
@@ -144,6 +185,19 @@ export function useSpeedometer() {
     return (Date.now() - tripStartedAtRef.current) / 1000;
   }, []);
 
+  const syncLiveRouteState = useCallback(() => {
+    setLiveRoutePoints([...routePointsRef.current]);
+
+    const lastPoint = previousPositionRef.current;
+    if (lastPoint) {
+      setCurrentPosition({
+        latitude: lastPoint.latitude,
+        longitude: lastPoint.longitude,
+        heading: currentHeadingRef.current,
+      });
+    }
+  }, []);
+
   const syncStats = useCallback(() => {
     setStats(
       buildStats(
@@ -153,11 +207,11 @@ export function useSpeedometer() {
         getMovingElapsedSeconds(),
         getTotalElapsedSeconds(),
         latestTelemetryRef.current.altitude,
-        latestTelemetryRef.current.heading,
         latestTelemetryRef.current.accuracy
       )
     );
-  }, [getMovingElapsedSeconds, getTotalElapsedSeconds]);
+    syncLiveRouteState();
+  }, [getMovingElapsedSeconds, getTotalElapsedSeconds, syncLiveRouteState]);
 
   const finalizeMovingSegment = useCallback(() => {
     if (movingSegmentStartedAtRef.current) {
@@ -167,16 +221,34 @@ export function useSpeedometer() {
     }
   }, []);
 
-  const stopSubscription = useCallback(async () => {
-    if (subscriptionRef.current) {
-      subscriptionRef.current.remove();
-      subscriptionRef.current = null;
+  const stopLocationUpdates = useCallback(async () => {
+    if (foregroundSubscriptionRef.current) {
+      foregroundSubscriptionRef.current.remove();
+      foregroundSubscriptionRef.current = null;
+    }
+
+    if (headingSubscriptionRef.current) {
+      headingSubscriptionRef.current.remove();
+      headingSubscriptionRef.current = null;
+    }
+
+    if (!supportsBackgroundLocationUpdates()) {
+      return;
+    }
+
+    const hasStarted = await hasBackgroundLocationTaskStarted();
+    if (hasStarted) {
+      try {
+        await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+      } catch {
+        // Background location APIs may be unavailable in some dev environments.
+      }
     }
   }, []);
 
   const resetSession = useCallback(async () => {
     finalizeMovingSegment();
-    await stopSubscription();
+    await stopLocationUpdates();
     clearDurationTimer();
     previousPositionRef.current = null;
     tripStartedAtRef.current = null;
@@ -186,11 +258,15 @@ export function useSpeedometer() {
     speedSamplesMpsRef.current = [];
     routePointsRef.current = [];
     lastRoutePointRef.current = null;
-    latestTelemetryRef.current = { altitude: null, heading: null, accuracy: null };
+    latestTelemetryRef.current = { altitude: null, accuracy: null };
+    currentHeadingRef.current = null;
     setStats(INITIAL_STATS);
+    setLiveRoutePoints([]);
+    setCurrentPosition(null);
+    setTripStartPosition(null);
     setError(null);
     setStatus('idle');
-  }, [clearDurationTimer, finalizeMovingSegment, stopSubscription]);
+  }, [clearDurationTimer, finalizeMovingSegment, stopLocationUpdates]);
 
   const requestPermission = useCallback(async () => {
     const { status: permissionStatus } = await Location.requestForegroundPermissionsAsync();
@@ -199,11 +275,26 @@ export function useSpeedometer() {
 
     if (!granted) {
       setError('Location permission is required to track your speed.');
-    } else {
-      setError(null);
+      return false;
     }
 
-    return granted;
+    const backgroundPermission = await Location.getBackgroundPermissionsAsync();
+    let backgroundGranted =
+      backgroundPermission.status === Location.PermissionStatus.GRANTED;
+
+    if (!backgroundGranted) {
+      const requested = await Location.requestBackgroundPermissionsAsync();
+      backgroundGranted = requested.status === Location.PermissionStatus.GRANTED;
+    }
+
+    setBackgroundPermissionGranted(backgroundGranted);
+    setError(
+      backgroundGranted
+        ? null
+        : 'Background location is off. Tracking may pause when the phone is locked.',
+    );
+
+    return true;
   }, []);
 
   const recordRoutePoint = useCallback(
@@ -223,6 +314,7 @@ export function useSpeedometer() {
       if (!lastPoint) {
         routePointsRef.current.push(point);
         lastRoutePointRef.current = { latitude, longitude };
+        setTripStartPosition({ latitude, longitude });
         return;
       }
 
@@ -267,8 +359,12 @@ export function useSpeedometer() {
 
   const handleLocationUpdate = useCallback(
     (location: Location.LocationObject) => {
+      if (statusRef.current !== 'tracking') {
+        return;
+      }
+
       const { coords, timestamp } = location;
-      const currentPosition: PositionSnapshot = {
+      const currentPositionSnapshot: PositionSnapshot = {
         latitude: coords.latitude,
         longitude: coords.longitude,
         timestamp,
@@ -286,16 +382,44 @@ export function useSpeedometer() {
       const speedMps = resolveSpeedMps(
         coords.speed,
         previousPositionRef.current,
-        currentPosition
+        currentPositionSnapshot
       );
+
+      let heading: number | null = null;
+      if (coords.heading != null && coords.heading >= 0) {
+        heading = coords.heading;
+      } else if (previousPositionRef.current) {
+        const previous = previousPositionRef.current;
+        const movedMeters = haversineDistanceMeters(
+          previous.latitude,
+          previous.longitude,
+          coords.latitude,
+          coords.longitude
+        );
+
+        if (movedMeters >= 5) {
+          heading = bearingDegrees(
+            previous.latitude,
+            previous.longitude,
+            coords.latitude,
+            coords.longitude
+          );
+        }
+      }
+
+      if (heading != null) {
+        currentHeadingRef.current = smoothHeading(currentHeadingRef.current, heading, {
+          deadZoneDegrees: 8,
+          alpha: 0.3,
+        });
+      }
 
       recordRoutePoint(coords.latitude, coords.longitude, speedMps, timestamp);
 
-      previousPositionRef.current = currentPosition;
+      previousPositionRef.current = currentPositionSnapshot;
       speedSamplesMpsRef.current.push(speedMps);
       latestTelemetryRef.current = {
         altitude: coords.altitude,
-        heading: coords.heading,
         accuracy: coords.accuracy,
       };
 
@@ -304,17 +428,70 @@ export function useSpeedometer() {
     [recordRoutePoint, syncStats]
   );
 
-  const beginWatch = useCallback(async () => {
-    subscriptionRef.current = await Location.watchPositionAsync(
-      {
-        accuracy: Location.Accuracy.BestForNavigation,
-        timeInterval: 1000,
-        distanceInterval: 1,
-      },
-      handleLocationUpdate,
-      (reason) => setError(reason)
-    );
-  }, [handleLocationUpdate]);
+  const beginLocationUpdates = useCallback(async () => {
+    let usingBackgroundUpdates = false;
+
+    if (supportsBackgroundLocationUpdates()) {
+      const hasStarted = await hasBackgroundLocationTaskStarted();
+      if (hasStarted) {
+        usingBackgroundUpdates = true;
+      } else {
+        try {
+          await Location.startLocationUpdatesAsync(
+            BACKGROUND_LOCATION_TASK,
+            LOCATION_UPDATE_OPTIONS
+          );
+          usingBackgroundUpdates = true;
+        } catch {
+          // Fall through to foreground watching when background APIs fail.
+        }
+      }
+    }
+
+    if (!usingBackgroundUpdates && !foregroundSubscriptionRef.current) {
+      foregroundSubscriptionRef.current = await Location.watchPositionAsync(
+        LOCATION_UPDATE_OPTIONS,
+        handleLocationUpdate,
+        (message) => setError(message)
+      );
+    }
+
+    if (!headingSubscriptionRef.current) {
+      try {
+        headingSubscriptionRef.current = await Location.watchHeadingAsync((headingData) => {
+          if (statusRef.current !== 'tracking') {
+            return;
+          }
+
+          const speedMps = speedSamplesMpsRef.current.at(-1) ?? 0;
+          if (speedMps > 1.2) {
+            return;
+          }
+
+          const resolvedHeading =
+            headingData.trueHeading >= 0 ? headingData.trueHeading : headingData.magHeading;
+
+          if (resolvedHeading < 0) {
+            return;
+          }
+
+          const nextHeading = smoothHeading(currentHeadingRef.current, resolvedHeading, {
+            deadZoneDegrees: 10,
+            alpha: 0.2,
+          });
+
+          if (currentHeadingRef.current === nextHeading) {
+            return;
+          }
+
+          currentHeadingRef.current = nextHeading;
+          syncLiveRouteState();
+        });
+      } catch {
+        // Compass heading is unavailable on some platforms.
+      }
+    }
+  }, [handleLocationUpdate, syncLiveRouteState]);
 
   const startDurationTimer = useCallback(() => {
     clearDurationTimer();
@@ -322,20 +499,12 @@ export function useSpeedometer() {
   }, [clearDurationTimer, syncStats]);
 
   const startTracking = useCallback(async () => {
-    setError(null);
-
-    const currentPermission = await Location.getForegroundPermissionsAsync();
-    let granted = currentPermission.status === Location.PermissionStatus.GRANTED;
-
-    if (!granted) {
-      granted = await requestPermission();
-    }
-
+    const granted = await requestPermission();
     if (!granted) {
       return;
     }
 
-    await stopSubscription();
+    await stopLocationUpdates();
     await resetSession();
 
     const now = Date.now();
@@ -343,8 +512,8 @@ export function useSpeedometer() {
     movingSegmentStartedAtRef.current = now;
     setStatus('tracking');
     startDurationTimer();
-    await beginWatch();
-  }, [beginWatch, requestPermission, resetSession, startDurationTimer, stopSubscription]);
+    await beginLocationUpdates();
+  }, [beginLocationUpdates, requestPermission, resetSession, startDurationTimer, stopLocationUpdates]);
 
   const requestPermissionAndStart = useCallback(async () => {
     const granted = await requestPermission();
@@ -355,21 +524,17 @@ export function useSpeedometer() {
     return granted;
   }, [requestPermission, startTracking]);
 
-  useEffect(() => {
-    startTrackingRef.current = startTracking;
-  }, [startTracking]);
-
   const pauseTracking = useCallback(async () => {
     if (statusRef.current !== 'tracking') {
       return;
     }
 
     finalizeMovingSegment();
-    await stopSubscription();
+    await stopLocationUpdates();
     setStatus('paused');
     syncStats();
     setStats((current) => ({ ...current, currentSpeed: 0 }));
-  }, [finalizeMovingSegment, stopSubscription, syncStats]);
+  }, [finalizeMovingSegment, stopLocationUpdates, syncStats]);
 
   const resumeTracking = useCallback(async () => {
     if (statusRef.current !== 'paused') {
@@ -380,8 +545,8 @@ export function useSpeedometer() {
     movingSegmentStartedAtRef.current = Date.now();
     setStatus('tracking');
     startDurationTimer();
-    await beginWatch();
-  }, [beginWatch, startDurationTimer]);
+    await beginLocationUpdates();
+  }, [beginLocationUpdates, startDurationTimer]);
 
   const togglePlayPause = useCallback(async () => {
     if (statusRef.current === 'idle') {
@@ -410,7 +575,6 @@ export function useSpeedometer() {
       getMovingElapsedSeconds(),
       getTotalElapsedSeconds(),
       latestTelemetryRef.current.altitude,
-      latestTelemetryRef.current.heading,
       latestTelemetryRef.current.accuracy
     );
 
@@ -432,17 +596,36 @@ export function useSpeedometer() {
 
   const stopTracking = useCallback(async () => {
     finalizeMovingSegment();
-    await stopSubscription();
+    await stopLocationUpdates();
     clearDurationTimer();
     setStatus('idle');
     syncStats();
     setStats((current) => ({ ...current, currentSpeed: 0 }));
-  }, [clearDurationTimer, finalizeMovingSegment, stopSubscription, syncStats]);
+  }, [clearDurationTimer, finalizeMovingSegment, stopLocationUpdates, syncStats]);
 
   const finishTrip = useCallback(async () => {
     await stopTracking();
     await resetSession();
   }, [resetSession, stopTracking]);
+
+  useEffect(() => {
+    setBackgroundLocationHandler(handleLocationUpdate);
+
+    return () => {
+      setBackgroundLocationHandler(null);
+    };
+  }, [handleLocationUpdate]);
+
+  useEffect(() => {
+    const handleAppStateChange = (nextState: AppStateStatus) => {
+      if (nextState === 'active' && statusRef.current === 'tracking') {
+        syncStats();
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => subscription.remove();
+  }, [syncStats]);
 
   useEffect(() => {
     if (hasInitializedRef.current) {
@@ -454,21 +637,23 @@ export function useSpeedometer() {
 
     void (async () => {
       const currentPermission = await Location.getForegroundPermissionsAsync();
-      let granted = currentPermission.status === Location.PermissionStatus.GRANTED;
-
-      if (!granted) {
-        const result = await Location.requestForegroundPermissionsAsync();
-        granted = result.status === Location.PermissionStatus.GRANTED;
-      }
+      const granted = currentPermission.status === Location.PermissionStatus.GRANTED;
+      const backgroundPermission = await Location.getBackgroundPermissionsAsync();
 
       if (!mounted) {
         return;
       }
 
-      setPermissionGranted(granted);
+      setPermissionGranted(
+        currentPermission.status === Location.PermissionStatus.UNDETERMINED
+          ? null
+          : granted,
+      );
+      setBackgroundPermissionGranted(
+        backgroundPermission.status === Location.PermissionStatus.GRANTED,
+      );
 
       if (!granted) {
-        setError('Location permission is required to track your speed.');
         return;
       }
 
@@ -483,9 +668,9 @@ export function useSpeedometer() {
     return () => {
       mounted = false;
       clearDurationTimer();
-      void stopSubscription();
+      void stopLocationUpdates();
     };
-  }, [clearDurationTimer, startTracking, stopSubscription]);
+  }, [clearDurationTimer, startTracking, stopLocationUpdates]);
 
   return {
     unit,
@@ -493,7 +678,11 @@ export function useSpeedometer() {
     status,
     stats,
     permissionGranted,
+    backgroundPermissionGranted,
     error,
+    liveRoutePoints,
+    currentPosition,
+    tripStartPosition,
     requestPermission,
     requestPermissionAndStart,
     startTracking,

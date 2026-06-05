@@ -63,16 +63,6 @@ export function formatDuration(seconds: number): string {
   return `${minutes}:${secs.toString().padStart(2, '0')}`;
 }
 
-export function formatHeading(heading: number | null): string {
-  if (heading == null || Number.isNaN(heading)) {
-    return '--';
-  }
-
-  const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
-  const index = Math.round(heading / 45) % 8;
-  return directions[index];
-}
-
 export function formatAltitude(meters: number | null, unit: SpeedUnit): string {
   if (meters == null || Number.isNaN(meters)) {
     return '--';
@@ -133,4 +123,113 @@ export function resolveSpeedMps(
   );
 
   return distance / elapsedSeconds;
+}
+
+export function bearingDegrees(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const toRadians = (value: number) => (value * Math.PI) / 180;
+  const toDegrees = (value: number) => (value * 180) / Math.PI;
+
+  const lat1Rad = toRadians(lat1);
+  const lat2Rad = toRadians(lat2);
+  const deltaLon = toRadians(lon2 - lon1);
+
+  const y = Math.sin(deltaLon) * Math.cos(lat2Rad);
+  const x =
+    Math.cos(lat1Rad) * Math.sin(lat2Rad) -
+    Math.sin(lat1Rad) * Math.cos(lat2Rad) * Math.cos(deltaLon);
+
+  return (toDegrees(Math.atan2(y, x)) + 360) % 360;
+}
+
+export function headingAngleDifference(from: number, to: number): number {
+  const start = normalizeHeading(from);
+  const end = normalizeHeading(to);
+  if (start == null || end == null) {
+    return 0;
+  }
+
+  let diff = end - start;
+  if (diff > 180) {
+    diff -= 360;
+  }
+  if (diff < -180) {
+    diff += 360;
+  }
+  return diff;
+}
+
+export function smoothHeading(
+  previous: number | null,
+  next: number,
+  options?: { deadZoneDegrees?: number; alpha?: number }
+): number {
+  const normalized = normalizeHeading(next);
+  if (normalized == null) {
+    return previous ?? 0;
+  }
+  if (previous == null) {
+    return normalized;
+  }
+
+  const previousNormalized = normalizeHeading(previous);
+  if (previousNormalized == null) {
+    return normalized;
+  }
+
+  const deadZone = options?.deadZoneDegrees ?? 6;
+  const alpha = options?.alpha ?? 0.25;
+  const diff = headingAngleDifference(previousNormalized, normalized);
+
+  if (Math.abs(diff) < deadZone) {
+    return previousNormalized;
+  }
+
+  return normalizeHeading(previousNormalized + diff * alpha) ?? normalized;
+}
+
+const COMPASS_SHORT_LABELS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const;
+const COMPASS_FULL_LABELS = [
+  'North',
+  'Northeast',
+  'East',
+  'Southeast',
+  'South',
+  'Southwest',
+  'West',
+  'Northwest',
+] as const;
+
+function normalizeHeading(heading: number | null | undefined): number | null {
+  if (heading == null || !Number.isFinite(heading) || heading < 0) {
+    return null;
+  }
+
+  return ((heading % 360) + 360) % 360;
+}
+
+function getCompassIndex(heading: number) {
+  return Math.round(heading / 45) % COMPASS_SHORT_LABELS.length;
+}
+
+export function headingToCompassShort(heading: number | null | undefined): string {
+  const normalized = normalizeHeading(heading);
+  if (normalized == null) {
+    return '--';
+  }
+
+  return COMPASS_SHORT_LABELS[getCompassIndex(normalized)];
+}
+
+export function headingToCompassLabel(heading: number | null | undefined): string {
+  const normalized = normalizeHeading(heading);
+  if (normalized == null) {
+    return '--';
+  }
+
+  return COMPASS_FULL_LABELS[getCompassIndex(normalized)];
 }

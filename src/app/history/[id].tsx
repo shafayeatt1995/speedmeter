@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { DeleteTripDialog } from '@/components/delete-trip-dialog';
+import { ScreenTopActions } from '@/components/screen-top-actions';
 import { TripDetails } from '@/components/speedometer/trip-details';
 import { Button } from '@/components/ui/button';
 import { Text } from '@/components/ui/text';
@@ -12,6 +14,8 @@ export default function TripDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [trip, setTrip] = useState<SavedTrip | null>(null);
   const [loading, setLoading] = useState(true);
+  const [deleteDialogVisible, setDeleteDialogVisible] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -26,12 +30,15 @@ export default function TripDetailScreen() {
     })();
   }, [id]);
 
-  const handleDelete = async () => {
-    if (!trip) {
+  const handleConfirmDelete = async () => {
+    if (!trip || deleting) {
       return;
     }
 
+    setDeleting(true);
     await deleteTrip(trip.id);
+    setDeleting(false);
+    setDeleteDialogVisible(false);
     router.replace('/history');
   };
 
@@ -47,22 +54,25 @@ export default function TripDetailScreen() {
     <SafeAreaView className="flex-1 bg-background">
       <ScrollView contentContainerClassName="px-5 pb-10" showsVerticalScrollIndicator={false}>
         <View className="flex-row items-center justify-between pt-2">
-          <Text variant="h3">Trip details</Text>
           <Pressable
             onPress={() => router.back()}
             className="rounded-full border border-primary/20 bg-card px-4 py-2">
             <Text className="font-semibold text-primary">Back</Text>
           </Pressable>
+          <ScreenTopActions />
         </View>
+        <Text variant="h3" className="mt-4">
+          Trip details
+        </Text>
 
         {loading ? (
           <View className="mt-16 items-center">
             <ActivityIndicator />
           </View>
         ) : !trip ? (
-          <View className="mt-10 rounded-3xl border border-destructive/25 bg-destructive/10 p-6">
+          <View className="mt-10 rounded-md border border-destructive/25 bg-destructive/10 p-6">
             <Text className="font-semibold">Trip not found</Text>
-            <Button className="mt-4 rounded-2xl" onPress={() => router.replace('/history')}>
+            <Button className="mt-4" onPress={() => router.replace('/history')}>
               <Text>Go to history</Text>
             </Button>
           </View>
@@ -71,7 +81,6 @@ export default function TripDetailScreen() {
             <TripDetails trip={trip} />
             <View className="mt-8 gap-3">
               <Button
-                className="rounded-2xl"
                 disabled={!tripHasRoute(trip)}
                 onPress={handleReplayTrip}>
                 <Text>Replay trip</Text>
@@ -85,13 +94,26 @@ export default function TripDetailScreen() {
                   Watch your ride on a free map with speed at each point. Use + and − to adjust replay speed.
                 </Text>
               )}
-              <Button className="rounded-2xl" variant="outline" onPress={() => void handleDelete()}>
+              <Button
+                variant="destructive"
+                onPress={() => setDeleteDialogVisible(true)}>
                 <Text>Delete trip</Text>
               </Button>
             </View>
           </View>
         )}
       </ScrollView>
+
+      <DeleteTripDialog
+        visible={deleteDialogVisible}
+        trip={trip}
+        onCancel={() => {
+          if (!deleting) {
+            setDeleteDialogVisible(false);
+          }
+        }}
+        onConfirm={() => void handleConfirmDelete()}
+      />
     </SafeAreaView>
   );
 }

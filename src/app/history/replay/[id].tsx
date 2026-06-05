@@ -1,6 +1,6 @@
 import { useLocalSearchParams, router } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Platform, View } from 'react-native';
+import { useEffect, useState, useSyncExternalStore } from 'react';
+import { ActivityIndicator, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { TripReplayPlayer } from '@/components/trip-replay/trip-replay-player';
@@ -8,15 +8,19 @@ import { Button } from '@/components/ui/button';
 import { Text } from '@/components/ui/text';
 import { getSavedTrip, tripHasRoute, type SavedTrip } from '@/lib/trip-storage';
 
+function subscribeToClient() {
+  return () => {};
+}
+
 export default function TripReplayScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [trip, setTrip] = useState<SavedTrip | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isClient, setIsClient] = useState(Platform.OS !== 'web');
-
-  useEffect(() => {
-    setIsClient(true);
-  }, []);
+  const isClient = useSyncExternalStore(
+    subscribeToClient,
+    () => true,
+    () => false,
+  );
 
   useEffect(() => {
     void (async () => {
@@ -47,7 +51,7 @@ export default function TripReplayScreen() {
           <Text variant="muted" className="mt-2 text-center">
             This trip has no saved route points. Record and save a new trip to replay it.
           </Text>
-          <Button className="mt-6 rounded-2xl" onPress={() => router.back()}>
+          <Button className="mt-6" onPress={() => router.back()}>
             <Text>Go back</Text>
           </Button>
         </View>

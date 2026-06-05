@@ -41,3 +41,11 @@ example
 # generated native folders
 /ios
 /android
+
+# local APK output
+speedometer.apk
+speedometer-release.apk
+
+# release signing (never commit)
+/credentials/
+android/keystore.properties

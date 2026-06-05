@@ -36,7 +36,7 @@ export function EndTripDialog({
         onPress={onDiscard}
       >
         <Pressable
-          className="w-full max-w-md rounded-3xl border border-primary/20 bg-card p-5"
+          className="w-full max-w-md rounded-md border border-primary/20 bg-card p-5"
           onPress={(event) => event.stopPropagation()}
         >
           <Text className="text-[10px] font-bold uppercase text-primary">
@@ -50,7 +50,7 @@ export function EndTripDialog({
             history.
           </Text>
 
-          <View className="mt-5 gap-3 rounded-2xl border border-primary/10 bg-primary/5 p-4">
+          <View className="mt-5 gap-3 rounded-md border border-primary/10 bg-primary/5 p-4">
             <View className="flex-row justify-between">
               <Text variant="muted">Distance</Text>
               <Text className="font-semibold">{summary.distance}</Text>
@@ -69,13 +69,13 @@ export function EndTripDialog({
 
           <View className="mt-6 flex-row gap-3">
             <Button
-              className="flex-1 rounded-2xl"
+              className="flex-1 rounded-md"
               variant="outline"
               onPress={onDiscard}
             >
               <Text>Don&apos;t save</Text>
             </Button>
-            <Button className="flex-1 rounded-2xl" onPress={onSave}>
+            <Button className="flex-1 rounded-md" onPress={onSave}>
               <Text>Save trip</Text>
             </Button>
           </View>

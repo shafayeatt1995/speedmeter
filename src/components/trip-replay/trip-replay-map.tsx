@@ -136,7 +136,7 @@ export function TripReplayMap({ points, frame, style }: TripReplayMapProps) {
 
     const script = `window.updateReplayPosition(${frame.latitude}, ${frame.longitude}); true;`;
     webViewRef.current.injectJavaScript(script);
-  }, [frame?.latitude, frame?.longitude, mapReady]);
+  }, [frame, mapReady]);
 
   if (mapError) {
     return (

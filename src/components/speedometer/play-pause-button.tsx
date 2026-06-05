@@ -8,29 +8,38 @@ import { cn } from '@/lib/utils';
 
 const BUTTON_SIZE = 112;
 const ICON_SIZE = 46;
+const COMPACT_BUTTON_SIZE = 52;
+const COMPACT_ICON_SIZE = 22;
 
 type PlayPauseButtonProps = {
   status: TrackingStatus;
   onPress: () => void;
+  compact?: boolean;
+  showLabel?: boolean;
 };
 
-export function PlayPauseButton({ status, onPress }: PlayPauseButtonProps) {
+export function PlayPauseButton({
+  status,
+  onPress,
+  compact = false,
+  showLabel = true,
+}: PlayPauseButtonProps) {
   const isTracking = status === 'tracking';
   const isPaused = status === 'paused';
   const label = status === 'idle' ? 'Start trip' : isTracking ? 'Pause' : 'Resume';
-  const size = BUTTON_SIZE;
-  const iconSize = ICON_SIZE;
+  const size = compact ? COMPACT_BUTTON_SIZE : BUTTON_SIZE;
+  const iconSize = compact ? COMPACT_ICON_SIZE : ICON_SIZE;
 
   return (
-    <View className="items-center gap-4 py-2">
+    <View className={cn('items-center', compact ? 'gap-0' : 'gap-4 py-2')}>
       <View
-        className="rounded-full p-2"
+        className={cn('rounded-full', compact ? 'p-1' : 'p-2')}
         style={{
           backgroundColor: `${BRAND.indigo[500]}33`,
           shadowColor: BRAND.display.glow,
           shadowOpacity: isTracking ? 0.5 : 0.25,
-          shadowRadius: 20,
-          shadowOffset: { width: 0, height: 8 },
+          shadowRadius: compact ? 10 : 20,
+          shadowOffset: { width: 0, height: compact ? 4 : 8 },
         }}>
         <Pressable
           onPress={onPress}
@@ -46,8 +55,8 @@ export function PlayPauseButton({ status, onPress }: PlayPauseButtonProps) {
             height: size,
             shadowColor: BRAND.display.glow,
             shadowOpacity: 0.35,
-            shadowRadius: 12,
-            shadowOffset: { width: 0, height: 4 },
+            shadowRadius: compact ? 6 : 12,
+            shadowOffset: { width: 0, height: compact ? 2 : 4 },
           }}>
           <SymbolView
             name={{
@@ -60,10 +69,12 @@ export function PlayPauseButton({ status, onPress }: PlayPauseButtonProps) {
           />
         </Pressable>
       </View>
-      <Text variant="muted" className="text-base font-semibold">
-        {label}
-        {isPaused ? ' · rest time is counting' : ''}
-      </Text>
+      {showLabel ? (
+        <Text variant="muted" className={cn('font-semibold', compact ? 'text-xs' : 'text-base')}>
+          {label}
+          {isPaused ? ' · rest time is counting' : ''}
+        </Text>
+      ) : null}
     </View>
   );
 }

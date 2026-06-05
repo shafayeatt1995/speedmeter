@@ -3,14 +3,21 @@ import { Pressable } from 'react-native';
 import { useColorScheme } from 'nativewind';
 
 import { BRAND } from '@/lib/brand';
+import { saveColorScheme, type AppColorScheme } from '@/lib/theme-storage';
 
 export function ThemeToggle() {
-  const { colorScheme, toggleColorScheme } = useColorScheme();
+  const { colorScheme, setColorScheme } = useColorScheme();
   const isDark = colorScheme === 'dark';
+
+  const handleToggle = () => {
+    const nextScheme: AppColorScheme = isDark ? 'light' : 'dark';
+    setColorScheme(nextScheme);
+    void saveColorScheme(nextScheme);
+  };
 
   return (
     <Pressable
-      onPress={toggleColorScheme}
+      onPress={handleToggle}
       accessibilityLabel={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
       accessibilityRole="button"
       className="h-10 w-10 items-center justify-center rounded-full border border-primary/20 bg-card active:opacity-80"
