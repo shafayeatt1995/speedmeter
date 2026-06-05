@@ -67,5 +67,5 @@ export function createTripId(): string {
 }
 
 export function tripHasRoute(trip: SavedTrip) {
-  return (trip.routePoints?.length ?? 0) >= 2;
+  return (trip.routePoints?.length ?? 0) >= 1 && trip.endedAt > trip.startedAt;
 }

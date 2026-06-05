@@ -17,7 +17,8 @@ import {
 } from '@/lib/speed';
 import { createTripId, type SavedTrip, type TripRoutePoint } from '@/lib/trip-storage';
 
-const ROUTE_POINT_MIN_DISTANCE_METERS = 8;
+const ROUTE_POINT_MIN_DISTANCE_METERS = 2;
+const ROUTE_POINT_MIN_INTERVAL_MS = 1000;
 
 const LOCATION_UPDATE_OPTIONS: Location.LocationTaskOptions = {
   accuracy: Location.Accuracy.BestForNavigation,
@@ -130,6 +131,7 @@ export function useSpeedometer() {
   const speedSamplesMpsRef = useRef<number[]>([]);
   const routePointsRef = useRef<TripRoutePoint[]>([]);
   const lastRoutePointRef = useRef<Pick<TripRoutePoint, 'latitude' | 'longitude'> | null>(null);
+  const lastRoutePointTimeRef = useRef<number | null>(null);
   const latestTelemetryRef = useRef({
     altitude: null as number | null,
     accuracy: null as number | null,
@@ -257,6 +259,7 @@ export function useSpeedometer() {
     speedSamplesMpsRef.current = [];
     routePointsRef.current = [];
     lastRoutePointRef.current = null;
+    lastRoutePointTimeRef.current = null;
     latestTelemetryRef.current = { altitude: null, accuracy: null };
     currentHeadingRef.current = null;
     setStats(INITIAL_STATS);
@@ -297,7 +300,7 @@ export function useSpeedometer() {
   }, []);
 
   const recordRoutePoint = useCallback(
-    (latitude: number, longitude: number, speedMps: number, timestamp: number) => {
+    (latitude: number, longitude: number, speedMps: number, recordedAt: number) => {
       if (statusRef.current !== 'tracking') {
         return;
       }
@@ -306,30 +309,37 @@ export function useSpeedometer() {
         latitude,
         longitude,
         speed: metersPerSecondToUnit(speedMps, unitRef.current),
-        timestamp,
+        timestamp: recordedAt,
       };
       const lastPoint = lastRoutePointRef.current;
+      const lastRecordedAt = lastRoutePointTimeRef.current;
 
       if (!lastPoint) {
         routePointsRef.current.push(point);
         lastRoutePointRef.current = { latitude, longitude };
+        lastRoutePointTimeRef.current = recordedAt;
         setTripStartPosition({ latitude, longitude });
+        syncLiveRouteState();
         return;
       }
 
       const movedEnough =
         haversineDistanceMeters(lastPoint.latitude, lastPoint.longitude, latitude, longitude) >=
         ROUTE_POINT_MIN_DISTANCE_METERS;
+      const intervalElapsed =
+        lastRecordedAt == null || recordedAt - lastRecordedAt >= ROUTE_POINT_MIN_INTERVAL_MS;
 
-      if (movedEnough) {
+      if (movedEnough || intervalElapsed) {
         routePointsRef.current.push(point);
         lastRoutePointRef.current = { latitude, longitude };
+        lastRoutePointTimeRef.current = recordedAt;
+        syncLiveRouteState();
       }
     },
-    []
+    [syncLiveRouteState]
   );
 
-  const finalizeRoutePoints = useCallback((): TripRoutePoint[] => {
+  const finalizeRoutePoints = useCallback((endedAt = Date.now()): TripRoutePoint[] => {
     const points = [...routePointsRef.current];
     const lastPosition = previousPositionRef.current;
 
@@ -349,8 +359,18 @@ export function useSpeedometer() {
         latitude: lastPosition.latitude,
         longitude: lastPosition.longitude,
         speed: metersPerSecondToUnit(lastSpeedMps, unitRef.current),
-        timestamp: Date.now(),
+        timestamp: endedAt,
       });
+    } else if (points.length === 1) {
+      const onlyPoint = points[0];
+      points.push({
+        latitude: onlyPoint.latitude,
+        longitude: onlyPoint.longitude,
+        speed: onlyPoint.speed,
+        timestamp: endedAt,
+      });
+    } else if (lastStored) {
+      lastStored.timestamp = endedAt;
     }
 
     return points;
@@ -362,11 +382,12 @@ export function useSpeedometer() {
         return;
       }
 
-      const { coords, timestamp } = location;
+      const { coords } = location;
+      const recordedAt = Date.now();
       const currentPositionSnapshot: PositionSnapshot = {
         latitude: coords.latitude,
         longitude: coords.longitude,
-        timestamp,
+        timestamp: recordedAt,
       };
 
       if (previousPositionRef.current) {
@@ -413,7 +434,7 @@ export function useSpeedometer() {
         });
       }
 
-      recordRoutePoint(coords.latitude, coords.longitude, speedMps, timestamp);
+      recordRoutePoint(coords.latitude, coords.longitude, speedMps, recordedAt);
 
       previousPositionRef.current = currentPositionSnapshot;
       speedSamplesMpsRef.current.push(speedMps);
@@ -572,10 +593,12 @@ export function useSpeedometer() {
       latestTelemetryRef.current.accuracy
     );
 
+    const endedAt = Date.now();
+
     return {
       id: createTripId(),
       startedAt: tripStartedAtRef.current,
-      endedAt: Date.now(),
+      endedAt,
       unit: unitRef.current,
       maxSpeed: snapshotStats.maxSpeed,
       avgSpeedWithRest: snapshotStats.avgSpeedWithRest,
@@ -584,7 +607,7 @@ export function useSpeedometer() {
       movingDurationSeconds: snapshotStats.movingDurationSeconds,
       totalDurationSeconds: snapshotStats.totalDurationSeconds,
       altitude: snapshotStats.altitude,
-      routePoints: finalizeRoutePoints(),
+      routePoints: finalizeRoutePoints(endedAt),
     };
   }, [finalizeMovingSegment, finalizeRoutePoints, getMovingElapsedSeconds, getTotalElapsedSeconds]);
 

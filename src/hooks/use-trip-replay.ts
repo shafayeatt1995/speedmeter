@@ -14,7 +14,7 @@ const TICK_MS = 50;
 
 export function useTripReplay(trip: SavedTrip) {
   const points = useMemo(() => normalizeRoutePoints(trip), [trip]);
-  const durationMs = useMemo(() => getReplayDurationMs(points), [points]);
+  const durationMs = useMemo(() => getReplayDurationMs(trip, points), [trip, points]);
 
   const [progressMs, setProgressMs] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);

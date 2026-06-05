@@ -16,35 +16,51 @@ export function clampPlaybackRate(rate: number) {
   return Math.min(MAX_PLAYBACK_RATE, Math.max(MIN_PLAYBACK_RATE, Math.round(rate)));
 }
 
+function getTripDurationMs(trip: SavedTrip) {
+  return Math.max(trip.endedAt - trip.startedAt, 1);
+}
+
 export function normalizeRoutePoints(trip: SavedTrip): TripRoutePoint[] {
   const raw = trip.routePoints ?? [];
   if (raw.length === 0) {
     return [];
   }
 
-  const tripDuration = Math.max(trip.endedAt - trip.startedAt, 1);
+  const tripStart = trip.startedAt;
+  const tripDuration = getTripDurationMs(trip);
 
-  return raw.map((point, index) => {
-    const hasSpeed = typeof point.speed === 'number' && !Number.isNaN(point.speed);
-    const hasTimestamp = typeof point.timestamp === 'number' && !Number.isNaN(point.timestamp);
+  if (raw.length === 1) {
+    const point = raw[0];
+    return [
+      {
+        latitude: point.latitude,
+        longitude: point.longitude,
+        speed: point.speed ?? 0,
+        timestamp: tripStart,
+      },
+      {
+        latitude: point.latitude,
+        longitude: point.longitude,
+        speed: point.speed ?? 0,
+        timestamp: tripStart + tripDuration,
+      },
+    ];
+  }
 
-    return {
-      latitude: point.latitude,
-      longitude: point.longitude,
-      speed: hasSpeed ? point.speed : 0,
-      timestamp: hasTimestamp
-        ? point.timestamp
-        : trip.startedAt + (index / Math.max(raw.length - 1, 1)) * tripDuration,
-    };
-  });
+  return raw.map((point, index) => ({
+    latitude: point.latitude,
+    longitude: point.longitude,
+    speed: typeof point.speed === 'number' && !Number.isNaN(point.speed) ? point.speed : 0,
+    timestamp: tripStart + (index / (raw.length - 1)) * tripDuration,
+  }));
 }
 
-export function getReplayDurationMs(points: TripRoutePoint[]) {
+export function getReplayDurationMs(trip: SavedTrip, points: TripRoutePoint[]) {
   if (points.length < 2) {
     return 0;
   }
 
-  return Math.max(points[points.length - 1].timestamp - points[0].timestamp, 1);
+  return getTripDurationMs(trip);
 }
 
 export function getReplayFrame(points: TripRoutePoint[], progressMs: number): ReplayFrame | null {
@@ -64,7 +80,8 @@ export function getReplayFrame(points: TripRoutePoint[], progressMs: number): Re
 
   const startTime = points[0].timestamp;
   const endTime = points[points.length - 1].timestamp;
-  const absoluteTime = startTime + Math.min(Math.max(progressMs, 0), endTime - startTime);
+  const durationMs = Math.max(endTime - startTime, 1);
+  const absoluteTime = startTime + Math.min(Math.max(progressMs, 0), durationMs);
 
   if (absoluteTime <= startTime) {
     return {
@@ -82,7 +99,7 @@ export function getReplayFrame(points: TripRoutePoint[], progressMs: number): Re
       latitude: last.latitude,
       longitude: last.longitude,
       speed: last.speed,
-      progressMs: endTime - startTime,
+      progressMs: durationMs,
       pointIndex: points.length - 1,
     };
   }
@@ -98,8 +115,7 @@ export function getReplayFrame(points: TripRoutePoint[], progressMs: number): Re
       return {
         latitude: current.latitude + (next.latitude - current.latitude) * ratio,
         longitude: current.longitude + (next.longitude - current.longitude) * ratio,
-        speed:
-          Math.round((current.speed + (next.speed - current.speed) * ratio) * 100) / 100,
+        speed: Math.round(current.speed + (next.speed - current.speed) * ratio),
         progressMs: absoluteTime - startTime,
         pointIndex: index,
       };
@@ -111,14 +127,14 @@ export function getReplayFrame(points: TripRoutePoint[], progressMs: number): Re
     latitude: fallback.latitude,
     longitude: fallback.longitude,
     speed: fallback.speed,
-    progressMs: endTime - startTime,
+    progressMs: durationMs,
     pointIndex: points.length - 1,
   };
 }
 
 export function formatReplayClock(progressMs: number, durationMs: number) {
   const format = (ms: number) => {
-    const totalSeconds = Math.floor(ms / 1000);
+    const totalSeconds = Math.max(0, Math.round(ms / 1000));
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
