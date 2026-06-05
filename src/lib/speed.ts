@@ -23,7 +23,7 @@ export function metersPerSecondToUnit(speedMps: number, unit: SpeedUnit): number
 }
 
 export function formatSpeed(speed: number, _unit?: SpeedUnit): string {
-  return formatDecimal(Math.max(0, speed));
+  return formatDecimal(Math.round(Math.max(0, speed)), 0);
 }
 
 export function averageSpeedFromDistance(

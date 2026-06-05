@@ -439,7 +439,7 @@ function MapModePanel({
   const facingLabel = headingToCompassLabel(heading);
   const facingShort = headingToCompassShort(heading);
 
-  const displaySpeed = formatDecimal(Math.max(0, stats.currentSpeed));
+  const displaySpeed = formatSpeed(stats.currentSpeed, unit);
 
   return (
     <View className="rounded-md border border-primary/20 bg-card p-3">

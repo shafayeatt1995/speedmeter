@@ -3,7 +3,7 @@ import { View } from "react-native";
 import { Text } from "@/components/ui/text";
 import { BRAND } from "@/lib/brand";
 import { DISPLAY_FONT } from "@/lib/fonts";
-import { formatDecimal, getUnitLabel, type SpeedUnit } from "@/lib/speed";
+import { formatSpeed, getUnitLabel, type SpeedUnit } from "@/lib/speed";
 import { cn } from "@/lib/utils";
 
 type SpeedDisplayProps = {
@@ -17,7 +17,7 @@ export function SpeedDisplay({
   unit,
   isActive = false,
 }: SpeedDisplayProps) {
-  const displaySpeed = formatDecimal(Math.max(0, speed));
+  const displaySpeed = formatSpeed(speed, unit);
 
   return (
     <View className="items-center py-6">
