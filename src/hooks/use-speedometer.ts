@@ -140,7 +140,6 @@ export function useSpeedometer() {
   const currentHeadingRef = useRef<number | null>(null);
   const unitRef = useRef(unit);
   const statusRef = useRef(status);
-  const autoStartAttemptedRef = useRef(false);
   const hasInitializedRef = useRef(false);
 
   useEffect(() => {
@@ -516,13 +515,8 @@ export function useSpeedometer() {
   }, [beginLocationUpdates, requestPermission, resetSession, startDurationTimer, stopLocationUpdates]);
 
   const requestPermissionAndStart = useCallback(async () => {
-    const granted = await requestPermission();
-    if (granted && statusRef.current === 'idle') {
-      autoStartAttemptedRef.current = true;
-      await startTracking();
-    }
-    return granted;
-  }, [requestPermission, startTracking]);
+    return requestPermission();
+  }, [requestPermission]);
 
   const pauseTracking = useCallback(async () => {
     if (statusRef.current !== 'tracking') {
@@ -653,24 +647,15 @@ export function useSpeedometer() {
         backgroundPermission.status === Location.PermissionStatus.GRANTED,
       );
 
-      if (!granted) {
-        return;
-      }
-
-      setError(null);
-
-      if (!autoStartAttemptedRef.current && statusRef.current === 'idle') {
-        autoStartAttemptedRef.current = true;
-        await startTracking();
+      if (granted) {
+        setError(null);
       }
     })();
 
     return () => {
       mounted = false;
-      clearDurationTimer();
-      void stopLocationUpdates();
     };
-  }, [clearDurationTimer, startTracking, stopLocationUpdates]);
+  }, []);
 
   return {
     unit,

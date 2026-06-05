@@ -173,7 +173,7 @@ function SpeedometerDetails({
           <Text className="font-semibold">Location access needed</Text>
           <Text variant="muted" className="mt-1">
             Tap below to allow location while using the app and in the
-            background so trips keep recording when your phone is locked.
+            background. Press Start when you are ready to begin a trip.
           </Text>
           <Button
             className="mt-4 rounded-md"
