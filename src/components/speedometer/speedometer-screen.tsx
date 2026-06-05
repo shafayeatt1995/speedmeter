@@ -82,8 +82,8 @@ function ViewModeToggle({
   return (
     <View className="flex-row rounded-full border border-primary/15 bg-card p-1">
       {[
-        { value: "normal" as const, label: "Normal" },
         { value: "map" as const, label: "Map" },
+        { value: "normal" as const, label: "Normal" },
       ].map((option) => (
         <Pressable
           key={option.value}
