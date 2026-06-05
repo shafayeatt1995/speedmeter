@@ -15,407 +15,8 @@ import {
 import { WebView } from "react-native-webview";
 
 import { Text } from "@/components/ui/text";
+import { buildLiveMapHtml } from "@/lib/map-tiles";
 import type { TripRoutePoint } from "@/lib/trip-storage";
-
-const LIVE_MAP_HTML = `<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
-    />
-    <link
-      rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-      crossorigin=""
-    />
-    <style>
-      html,
-      body,
-      #map {
-        width: 100%;
-        height: 100%;
-        margin: 0;
-        padding: 0;
-        background: #eef2ff;
-      }
-      .map-theme-dark,
-      .map-theme-dark #map {
-        background: #334155;
-      }
-      .current-location-marker {
-        background: transparent;
-        border: none;
-      }
-      .location-dot {
-        width: 14px;
-        height: 14px;
-        border-radius: 50%;
-        background: #6366f1;
-        border: 3px solid #ffffff;
-        box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.2);
-      }
-    </style>
-  </head>
-  <body>
-    <div id="map"></div>
-    <script
-      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-      crossorigin=""
-    ></script>
-    <script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
-    <script>
-      const map = L.map('map', {
-        zoomControl: true,
-        attributionControl: true,
-        rotate: true,
-        bearing: 0,
-        touchRotate: false,
-        shiftKeyRotate: false,
-        rotateControl: false,
-      });
-
-      const MAP_THEMES = {
-        light: {
-          url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          attribution: '&copy; OpenStreetMap contributors',
-          background: '#eef2ff',
-        },
-        dark: {
-          url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-          attribution:
-            '&copy; OpenStreetMap contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-          subdomains: 'abcd',
-          background: '#334155',
-        },
-      };
-
-      let tileLayer = null;
-
-      function applyMapTheme(theme) {
-        const config = MAP_THEMES[theme];
-        document.body.className = theme === 'dark' ? 'map-theme-dark' : 'map-theme-light';
-        document.body.style.background = config.background;
-        document.getElementById('map').style.background = config.background;
-
-        if (tileLayer) {
-          map.removeLayer(tileLayer);
-        }
-
-        tileLayer = L.tileLayer(config.url, {
-          maxZoom: 19,
-          attribution: config.attribution,
-          subdomains: config.subdomains || 'abc',
-        }).addTo(map);
-      }
-
-      window.setMapDarkMode = function (isDark) {
-        applyMapTheme(isDark ? 'dark' : 'light');
-      };
-
-      applyMapTheme('light');
-
-      let routeLine = null;
-      let routeCoords = [];
-      let startMarker = null;
-      let currentMarker = null;
-      let currentHeading = null;
-      let hasFitBounds = false;
-      let smoothedHeading = null;
-      let displayedMapHeading = null;
-      let bearingAnimationId = null;
-      let navigationMode = true;
-      let lastLat = null;
-      let lastLng = null;
-
-      function notifyFollowingState() {
-        if (!window.ReactNativeWebView) {
-          return;
-        }
-
-        window.ReactNativeWebView.postMessage(
-          navigationMode ? 'following-user' : 'user-moved-map',
-        );
-      }
-
-      function normalizeAngle(angle) {
-        return ((angle % 360) + 360) % 360;
-      }
-
-      function angleDifference(from, to) {
-        var diff = normalizeAngle(to) - normalizeAngle(from);
-        if (diff > 180) {
-          diff -= 360;
-        }
-        if (diff < -180) {
-          diff += 360;
-        }
-        return diff;
-      }
-
-      function lerpAngle(from, to, alpha) {
-        return normalizeAngle(from + angleDifference(from, to) * alpha);
-      }
-
-      function stopBearingAnimation() {
-        if (bearingAnimationId != null) {
-          cancelAnimationFrame(bearingAnimationId);
-          bearingAnimationId = null;
-        }
-      }
-
-      function centerMapOnPosition(lat, lng, animate) {
-        if (navigationMode) {
-          map.panTo([lat, lng], {
-            animate: animate !== false,
-            duration: 0.35,
-            easeLinearity: 0.25,
-          });
-          return;
-        }
-
-        if (animate === false) {
-          map.setView([lat, lng], map.getZoom());
-        } else {
-          map.panTo([lat, lng], { animate: true, duration: 0.35 });
-        }
-      }
-
-      function animateMapHeading() {
-        if (smoothedHeading == null) {
-          bearingAnimationId = null;
-          return;
-        }
-
-        if (displayedMapHeading == null) {
-          displayedMapHeading = smoothedHeading;
-        }
-
-        var diff = angleDifference(displayedMapHeading, smoothedHeading);
-        if (Math.abs(diff) < 0.4) {
-          displayedMapHeading = smoothedHeading;
-          if (typeof map.setBearing === 'function') {
-            map.setBearing(-displayedMapHeading);
-          }
-          bearingAnimationId = null;
-          return;
-        }
-
-        displayedMapHeading = lerpAngle(displayedMapHeading, smoothedHeading, 0.1);
-        if (typeof map.setBearing === 'function') {
-          map.setBearing(-displayedMapHeading);
-        }
-        bearingAnimationId = requestAnimationFrame(animateMapHeading);
-      }
-
-      function applyHeadingUpRotation(heading) {
-        if (heading == null || !Number.isFinite(heading)) {
-          return;
-        }
-
-        currentHeading = heading;
-
-        if (smoothedHeading == null) {
-          smoothedHeading = heading;
-          displayedMapHeading = heading;
-          if (typeof map.setBearing === 'function') {
-            map.setBearing(-heading);
-          }
-          return;
-        }
-
-        if (Math.abs(angleDifference(smoothedHeading, heading)) < 3) {
-          return;
-        }
-
-        smoothedHeading = lerpAngle(smoothedHeading, heading, 0.16);
-
-        if (bearingAnimationId == null) {
-          bearingAnimationId = requestAnimationFrame(animateMapHeading);
-        }
-      }
-
-      function createCurrentPositionDot() {
-        return L.divIcon({
-          className: 'current-location-marker',
-          html: '<div class="location-dot"></div>',
-          iconSize: [20, 20],
-          iconAnchor: [10, 10],
-        });
-      }
-
-      function ensureStartMarker(lat, lng) {
-        if (startMarker) {
-          return;
-        }
-
-        startMarker = L.circleMarker([lat, lng], {
-          radius: 8,
-          color: '#ffffff',
-          weight: 2,
-          fillColor: '#22C55E',
-          fillOpacity: 1,
-        })
-          .addTo(map)
-          .bindPopup('Start');
-      }
-
-      function ensureCurrentMarker(lat, lng, heading) {
-        lastLat = lat;
-        lastLng = lng;
-
-        if (navigationMode) {
-          if (currentMarker) {
-            map.removeLayer(currentMarker);
-            currentMarker = null;
-          }
-          centerMapOnPosition(lat, lng, true);
-          applyHeadingUpRotation(heading);
-          return;
-        }
-
-        if (!currentMarker) {
-          currentMarker = L.marker([lat, lng], {
-            icon: createCurrentPositionDot(),
-            interactive: false,
-            zIndexOffset: 1000,
-          }).addTo(map);
-        } else {
-          currentMarker.setLatLng([lat, lng]);
-        }
-      }
-
-      function refreshRouteLine() {
-        if (routeCoords.length < 2) {
-          return;
-        }
-
-        if (!routeLine) {
-          routeLine = L.polyline(routeCoords, {
-            color: '#818CF8',
-            weight: 5,
-            opacity: 0.9,
-          }).addTo(map);
-        } else {
-          routeLine.setLatLngs(routeCoords);
-        }
-
-        if (!hasFitBounds) {
-          map.fitBounds(routeLine.getBounds(), { padding: [56, 56] });
-          hasFitBounds = true;
-        }
-      }
-
-      window.resetLiveRoute = function () {
-        routeCoords = [];
-        hasFitBounds = false;
-
-        if (routeLine) {
-          map.removeLayer(routeLine);
-          routeLine = null;
-        }
-
-        if (startMarker) {
-          map.removeLayer(startMarker);
-          startMarker = null;
-        }
-
-        if (currentMarker) {
-          map.removeLayer(currentMarker);
-          currentMarker = null;
-        }
-
-        currentHeading = null;
-        smoothedHeading = null;
-        displayedMapHeading = null;
-        lastLat = null;
-        lastLng = null;
-        navigationMode = true;
-        stopBearingAnimation();
-        if (typeof map.setBearing === 'function') {
-          map.setBearing(0);
-        }
-      };
-
-      window.setLiveRoute = function (points) {
-        window.resetLiveRoute();
-
-        if (!points || !points.length) {
-          map.setView([0, 0], 2);
-          return;
-        }
-
-        routeCoords = points.map(function (point) {
-          return [point.latitude, point.longitude];
-        });
-
-        ensureStartMarker(points[0].latitude, points[0].longitude);
-        const last = points[points.length - 1];
-        ensureCurrentMarker(last.latitude, last.longitude, null);
-        refreshRouteLine();
-
-        if (routeCoords.length === 1) {
-          centerMapOnPosition(routeCoords[0][0], routeCoords[0][1], false);
-          map.setZoom(16);
-          applyHeadingUpRotation(null);
-        }
-      };
-
-      window.updateLivePosition = function (lat, lng, heading) {
-        ensureStartMarker(lat, lng);
-        ensureCurrentMarker(lat, lng, heading);
-
-        const last = routeCoords[routeCoords.length - 1];
-        if (!last || last[0] !== lat || last[1] !== lng) {
-          routeCoords.push([lat, lng]);
-          refreshRouteLine();
-        }
-      };
-
-      window.centerOnPosition = function (lat, lng) {
-        navigationMode = true;
-
-        if (currentMarker) {
-          map.removeLayer(currentMarker);
-          currentMarker = null;
-        }
-
-        const zoom = Math.max(map.getZoom(), 16);
-        map.setView([lat, lng], zoom, { animate: true });
-        applyHeadingUpRotation(currentHeading);
-        notifyFollowingState();
-      };
-
-      window.enableFollowing = function () {
-        navigationMode = true;
-        notifyFollowingState();
-      };
-
-      map.on('dragstart', function () {
-        if (!navigationMode) {
-          return;
-        }
-
-        navigationMode = false;
-
-        if (lastLat != null && lastLng != null) {
-          ensureCurrentMarker(lastLat, lastLng, currentHeading);
-        }
-
-        notifyFollowingState();
-      });
-
-      map.setView([23.8103, 90.4125], 12);
-
-      if (window.ReactNativeWebView) {
-        window.ReactNativeWebView.postMessage('ready');
-      }
-    </script>
-  </body>
-</html>`;
 
 type LiveTripMapProps = {
   routePoints: TripRoutePoint[];
@@ -427,6 +28,7 @@ type LiveTripMapProps = {
   darkMode?: boolean;
   style?: ViewStyle;
   onFollowingChange?: (isFollowing: boolean) => void;
+  onReady?: () => void;
 };
 
 export type LiveTripMapRef = {
@@ -436,145 +38,153 @@ export type LiveTripMapRef = {
 
 export const LiveTripMap = forwardRef<LiveTripMapRef, LiveTripMapProps>(
   function LiveTripMap(
-    { routePoints, currentPosition, darkMode = false, style, onFollowingChange },
+    {
+      routePoints,
+      currentPosition,
+      darkMode = false,
+      style,
+      onFollowingChange,
+      onReady,
+    },
     ref,
   ) {
-  const webViewRef = useRef<WebView>(null);
-  const currentPositionRef = useRef(currentPosition);
-  currentPositionRef.current = currentPosition;
-  const [mapReady, setMapReady] = useState(false);
-  const [mapError, setMapError] = useState(false);
-  const html = useMemo(() => LIVE_MAP_HTML, []);
-  const lastRouteCountRef = useRef(0);
+    const webViewRef = useRef<WebView>(null);
+    const currentPositionRef = useRef(currentPosition);
+    currentPositionRef.current = currentPosition;
+    const [mapReady, setMapReady] = useState(false);
+    const [mapError, setMapError] = useState(false);
+    const html = useMemo(() => buildLiveMapHtml(), []);
+    const lastRouteCountRef = useRef(0);
 
-  const buildPositionScript = (
-    position: NonNullable<LiveTripMapProps["currentPosition"]>,
-  ) => {
-    const headingValue =
-      position.heading != null && Number.isFinite(position.heading)
-        ? position.heading
-        : "null";
+    const buildPositionScript = (
+      position: NonNullable<LiveTripMapProps["currentPosition"]>,
+    ) => {
+      const headingValue =
+        position.heading != null && Number.isFinite(position.heading)
+          ? position.heading
+          : "null";
 
-    return `window.updateLivePosition(${position.latitude}, ${position.longitude}, ${headingValue}); true;`;
-  };
+      return `window.updateLivePosition(${position.latitude}, ${position.longitude}, ${headingValue}); true;`;
+    };
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      centerOnPosition() {
-        const position = currentPositionRef.current;
-        if (!position || !mapReady || !webViewRef.current) {
-          return;
+    useImperativeHandle(
+      ref,
+      () => ({
+        centerOnPosition() {
+          const position = currentPositionRef.current;
+          if (!position || !mapReady || !webViewRef.current) {
+            return;
+          }
+
+          const script = `window.centerOnPosition(${position.latitude}, ${position.longitude}); true;`;
+          webViewRef.current.injectJavaScript(script);
+        },
+        enableFollowing() {
+          if (!mapReady || !webViewRef.current) {
+            return;
+          }
+
+          webViewRef.current.injectJavaScript("window.enableFollowing(); true;");
+        },
+      }),
+      [mapReady],
+    );
+
+    useEffect(() => {
+      if (!mapReady || !webViewRef.current) {
+        return;
+      }
+
+      const themeScript = `window.setMapDarkMode(${darkMode ? "true" : "false"}); true;`;
+      webViewRef.current.injectJavaScript(themeScript);
+    }, [darkMode, mapReady]);
+
+    useEffect(() => {
+      if (!mapReady || !webViewRef.current) {
+        return;
+      }
+
+      if (routePoints.length === 0) {
+        lastRouteCountRef.current = 0;
+        if (currentPosition) {
+          webViewRef.current.injectJavaScript(buildPositionScript(currentPosition));
+        } else {
+          webViewRef.current.injectJavaScript("window.resetLiveRoute(); true;");
         }
+        return;
+      }
 
-        const script = `window.centerOnPosition(${position.latitude}, ${position.longitude}); true;`;
+      const shouldReloadRoute =
+        lastRouteCountRef.current === 0 ||
+        routePoints.length < lastRouteCountRef.current;
+
+      if (shouldReloadRoute) {
+        lastRouteCountRef.current = routePoints.length;
+        const script = `window.setLiveRoute(${JSON.stringify(routePoints)}); true;`;
         webViewRef.current.injectJavaScript(script);
-      },
-      enableFollowing() {
-        if (!mapReady || !webViewRef.current) {
-          return;
-        }
+        return;
+      }
 
-        webViewRef.current.injectJavaScript("window.enableFollowing(); true;");
-      },
-    }),
-    [mapReady],
-  );
+      if (routePoints.length > lastRouteCountRef.current) {
+        lastRouteCountRef.current = routePoints.length;
+      }
 
-  useEffect(() => {
-    if (!mapReady || !webViewRef.current) {
-      return;
-    }
-
-    const themeScript = `window.setMapDarkMode(${darkMode ? "true" : "false"}); true;`;
-    webViewRef.current.injectJavaScript(themeScript);
-  }, [darkMode, mapReady]);
-
-  useEffect(() => {
-    if (!mapReady || !webViewRef.current) {
-      return;
-    }
-
-    if (routePoints.length === 0) {
-      lastRouteCountRef.current = 0;
       if (currentPosition) {
         webViewRef.current.injectJavaScript(buildPositionScript(currentPosition));
-      } else {
-        webViewRef.current.injectJavaScript("window.resetLiveRoute(); true;");
       }
-      return;
+    }, [currentPosition, mapReady, routePoints]);
+
+    if (mapError) {
+      return (
+        <View style={[styles.container, styles.fallback, style]}>
+          <Text className="text-center font-semibold">Map failed to load</Text>
+          <Text variant="muted" className="mt-2 text-center text-sm">
+            Check your internet connection and try again.
+          </Text>
+        </View>
+      );
     }
 
-    const shouldReloadRoute =
-      lastRouteCountRef.current === 0 ||
-      routePoints.length < lastRouteCountRef.current;
-
-    if (shouldReloadRoute) {
-      lastRouteCountRef.current = routePoints.length;
-      const script = `window.setLiveRoute(${JSON.stringify(routePoints)}); true;`;
-      webViewRef.current.injectJavaScript(script);
-      return;
-    }
-
-    if (routePoints.length > lastRouteCountRef.current) {
-      lastRouteCountRef.current = routePoints.length;
-    }
-
-    if (currentPosition) {
-      webViewRef.current.injectJavaScript(buildPositionScript(currentPosition));
-    }
-  }, [currentPosition, mapReady, routePoints]);
-
-  if (mapError) {
     return (
-      <View style={[styles.container, styles.fallback, style]}>
-        <Text className="text-center font-semibold">Map failed to load</Text>
-        <Text variant="muted" className="mt-2 text-center text-sm">
-          Check your internet connection and try again.
-        </Text>
+      <View style={[styles.container, style]}>
+        {!mapReady ? (
+          <View style={styles.loader}>
+            <ActivityIndicator />
+          </View>
+        ) : null}
+        <WebView
+          ref={webViewRef}
+          originWhitelist={["*"]}
+          source={{ html }}
+          style={styles.webview}
+          javaScriptEnabled
+          domStorageEnabled
+          allowsInlineMediaPlayback
+          mixedContentMode="always"
+          setSupportMultipleWindows={false}
+          onMessage={(event) => {
+            const message = event.nativeEvent.data;
+
+            if (message === "ready") {
+              setMapReady(true);
+              onReady?.();
+              return;
+            }
+
+            if (message === "following-user") {
+              onFollowingChange?.(true);
+              return;
+            }
+
+            if (message === "user-moved-map") {
+              onFollowingChange?.(false);
+            }
+          }}
+          onError={() => setMapError(true)}
+          onHttpError={() => setMapError(true)}
+        />
       </View>
     );
-  }
-
-  return (
-    <View style={[styles.container, style]}>
-      {!mapReady ? (
-        <View style={styles.loader}>
-          <ActivityIndicator />
-        </View>
-      ) : null}
-      <WebView
-        ref={webViewRef}
-        originWhitelist={["*"]}
-        source={{ html }}
-        style={styles.webview}
-        javaScriptEnabled
-        domStorageEnabled
-        allowsInlineMediaPlayback
-        mixedContentMode="always"
-        setSupportMultipleWindows={false}
-        onMessage={(event) => {
-          const message = event.nativeEvent.data;
-
-          if (message === "ready") {
-            setMapReady(true);
-            return;
-          }
-
-          if (message === "following-user") {
-            onFollowingChange?.(true);
-            return;
-          }
-
-          if (message === "user-moved-map") {
-            onFollowingChange?.(false);
-          }
-        }}
-        onError={() => setMapError(true)}
-        onHttpError={() => setMapError(true)}
-      />
-    </View>
-  );
   },
 );
 
@@ -584,17 +194,17 @@ const styles = StyleSheet.create({
     minHeight: 320,
     overflow: "hidden",
     borderRadius: 8,
-    backgroundColor: "#334155",
+    backgroundColor: "#1A1A2E",
   },
   webview: {
     flex: 1,
-    backgroundColor: "#334155",
+    backgroundColor: "#1A1A2E",
   },
   loader: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#334155",
+    backgroundColor: "#1A1A2E",
     zIndex: 2,
   },
   fallback: {
