@@ -1,18 +1,18 @@
 {
   "expo": {
-    "name": "speedmeter",
-    "slug": "speedmeter",
+    "name": "speedometer",
+    "slug": "speedometer",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "speedmeter",
+    "scheme": "speedometer",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#4F46E5",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -26,9 +26,16 @@
     "plugins": [
       "expo-router",
       [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "speedometer needs your location to track speed while you walk, cycle, or ride.",
+          "locationAlwaysAndWhenInUsePermission": "speedometer needs your location to track speed while you walk, cycle, or ride."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#4F46E5",
           "android": {
             "image": "./assets/images/splash-icon.png",
             "imageWidth": 76
