@@ -20,6 +20,12 @@ import { createTripId, type SavedTrip, type TripRoutePoint } from '@/lib/trip-st
 const ROUTE_POINT_MIN_DISTANCE_METERS = 2;
 const ROUTE_POINT_MIN_INTERVAL_MS = 1000;
 
+const PREVIEW_LOCATION_OPTIONS: Location.LocationOptions = {
+  accuracy: Location.Accuracy.Balanced,
+  timeInterval: 2000,
+  distanceInterval: 5,
+};
+
 const LOCATION_UPDATE_OPTIONS: Location.LocationTaskOptions = {
   accuracy: Location.Accuracy.BestForNavigation,
   timeInterval: 2000,
@@ -318,7 +324,11 @@ export function useSpeedometer() {
         routePointsRef.current.push(point);
         lastRoutePointRef.current = { latitude, longitude };
         lastRoutePointTimeRef.current = recordedAt;
-        setTripStartPosition({ latitude, longitude });
+        setTripStartPosition({
+          latitude,
+          longitude,
+          heading: currentHeadingRef.current,
+        });
         syncLiveRouteState();
         return;
       }
@@ -376,13 +386,38 @@ export function useSpeedometer() {
     return points;
   }, []);
 
+  const updatePreviewPosition = useCallback((coords: Location.LocationObjectCoords) => {
+    if (coords.heading != null && coords.heading >= 0) {
+      currentHeadingRef.current = smoothHeading(currentHeadingRef.current, coords.heading, {
+        deadZoneDegrees: 8,
+        alpha: 0.3,
+      });
+    }
+
+    setCurrentPosition({
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      heading: currentHeadingRef.current,
+    });
+    latestTelemetryRef.current = {
+      altitude: coords.altitude,
+      accuracy: coords.accuracy,
+    };
+    setStats((current) => ({
+      ...current,
+      altitude: coords.altitude,
+      accuracy: coords.accuracy,
+    }));
+  }, []);
+
   const handleLocationUpdate = useCallback(
     (location: Location.LocationObject) => {
+      const { coords } = location;
+
       if (statusRef.current !== 'tracking') {
+        updatePreviewPosition(coords);
         return;
       }
-
-      const { coords } = location;
       const recordedAt = Date.now();
       const currentPositionSnapshot: PositionSnapshot = {
         latitude: coords.latitude,
@@ -445,8 +480,84 @@ export function useSpeedometer() {
 
       syncStats();
     },
-    [recordRoutePoint, syncStats]
+    [recordRoutePoint, syncStats, updatePreviewPosition]
   );
+
+  const startHeadingWatch = useCallback(async () => {
+    if (headingSubscriptionRef.current) {
+      return;
+    }
+
+    try {
+      headingSubscriptionRef.current = await Location.watchHeadingAsync((headingData) => {
+        const resolvedHeading =
+          headingData.trueHeading >= 0 ? headingData.trueHeading : headingData.magHeading;
+
+        if (resolvedHeading < 0) {
+          return;
+        }
+
+        if (statusRef.current === 'tracking') {
+          const speedMps = speedSamplesMpsRef.current.at(-1) ?? 0;
+          if (speedMps > 1.2) {
+            return;
+          }
+        }
+
+        const nextHeading = smoothHeading(currentHeadingRef.current, resolvedHeading, {
+          deadZoneDegrees: 10,
+          alpha: 0.2,
+        });
+
+        if (currentHeadingRef.current === nextHeading) {
+          return;
+        }
+
+        currentHeadingRef.current = nextHeading;
+
+        if (statusRef.current === 'tracking') {
+          syncLiveRouteState();
+          return;
+        }
+
+        setCurrentPosition((current) =>
+          current
+            ? {
+                ...current,
+                heading: nextHeading,
+              }
+            : current,
+        );
+      });
+    } catch {
+      // Compass heading is unavailable on some platforms.
+    }
+  }, [syncLiveRouteState]);
+
+  const ensureLocationWatching = useCallback(async () => {
+    if (statusRef.current === 'tracking') {
+      return;
+    }
+
+    try {
+      const lastKnown = await Location.getLastKnownPositionAsync();
+      if (lastKnown) {
+        updatePreviewPosition(lastKnown.coords);
+      }
+    } catch {
+      // Last known position is unavailable on some platforms.
+    }
+
+    if (!foregroundSubscriptionRef.current) {
+      foregroundSubscriptionRef.current = await Location.watchPositionAsync(
+        PREVIEW_LOCATION_OPTIONS,
+        handleLocationUpdate,
+        (message) => setError(message),
+      );
+    }
+
+    await startHeadingWatch();
+  }, [handleLocationUpdate, startHeadingWatch, updatePreviewPosition]);
 
   const beginLocationUpdates = useCallback(async () => {
     let usingBackgroundUpdates = false;
@@ -476,42 +587,8 @@ export function useSpeedometer() {
       );
     }
 
-    if (!headingSubscriptionRef.current) {
-      try {
-        headingSubscriptionRef.current = await Location.watchHeadingAsync((headingData) => {
-          if (statusRef.current !== 'tracking') {
-            return;
-          }
-
-          const speedMps = speedSamplesMpsRef.current.at(-1) ?? 0;
-          if (speedMps > 1.2) {
-            return;
-          }
-
-          const resolvedHeading =
-            headingData.trueHeading >= 0 ? headingData.trueHeading : headingData.magHeading;
-
-          if (resolvedHeading < 0) {
-            return;
-          }
-
-          const nextHeading = smoothHeading(currentHeadingRef.current, resolvedHeading, {
-            deadZoneDegrees: 10,
-            alpha: 0.2,
-          });
-
-          if (currentHeadingRef.current === nextHeading) {
-            return;
-          }
-
-          currentHeadingRef.current = nextHeading;
-          syncLiveRouteState();
-        });
-      } catch {
-        // Compass heading is unavailable on some platforms.
-      }
-    }
-  }, [handleLocationUpdate, syncLiveRouteState]);
+    await startHeadingWatch();
+  }, [handleLocationUpdate, startHeadingWatch]);
 
   const startDurationTimer = useCallback(() => {
     clearDurationTimer();
@@ -549,7 +626,8 @@ export function useSpeedometer() {
     setStatus('paused');
     syncStats();
     setStats((current) => ({ ...current, currentSpeed: 0 }));
-  }, [finalizeMovingSegment, stopLocationUpdates, syncStats]);
+    await ensureLocationWatching();
+  }, [ensureLocationWatching, finalizeMovingSegment, stopLocationUpdates, syncStats]);
 
   const resumeTracking = useCallback(async () => {
     if (statusRef.current !== 'paused') {
@@ -672,13 +750,22 @@ export function useSpeedometer() {
 
       if (granted) {
         setError(null);
+        await ensureLocationWatching();
       }
     })();
 
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [ensureLocationWatching]);
+
+  useEffect(() => {
+    if (permissionGranted !== true || status === 'tracking') {
+      return;
+    }
+
+    void ensureLocationWatching();
+  }, [ensureLocationWatching, permissionGranted, status]);
 
   return {
     unit,
